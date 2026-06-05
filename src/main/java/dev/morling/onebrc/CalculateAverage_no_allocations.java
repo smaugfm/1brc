@@ -17,7 +17,6 @@ package dev.morling.onebrc;
 
 import static dev.morling.onebrc.Searcher.searchForFirstNewline;
 import static dev.morling.onebrc.Searcher.searchForFirstSemicolon;
-import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -196,7 +195,7 @@ public class CalculateAverage_no_allocations {
     var keys = keysTl.get();
     var rows = rowsTl.get();
     while (rows[idx] != null) {
-      if (keys[idx] == hash) {
+      if (keys[idx] == hash && rows[idx].nameEquals(name)) {
         var existing = rows[idx];
         existing.merge(temp);
         return;
@@ -204,7 +203,20 @@ public class CalculateAverage_no_allocations {
       idx = (idx + 1) & (CAP - 1);
     }
     keys[idx] = hash;
-    rows[idx] = new TableRow(UTF_8.decode(name).toString(), temp);
+    rows[idx] = new TableRow(toBytes(name), temp);
+  }
+
+  /**
+   * Copy a buffer's [position, limit) into a fresh byte[]. Only called ≤10k times (on insert).
+   */
+  static byte[] toBytes(ByteBuffer buf) {
+    int len = buf.remaining();
+    byte[] b = new byte[len];
+    int base = buf.position();
+    for (int i = 0; i < len; i++) {
+      b[i] = buf.get(base + i);    // absolute → leaves position intact
+    }
+    return b;
   }
 
   static double parseTemp(ByteBuffer buffer) {
