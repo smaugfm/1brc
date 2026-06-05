@@ -3,21 +3,21 @@ package dev.morling.onebrc;
 @SuppressWarnings("preview")
 public class TableRow {
 
-  private String name;
+  private final String name;
   private double min;
-  private double mean;
   private double max;
   private double sum;
   private long count;
 
-  public TableRow(String name, double min, double mean, double max) {
+  public TableRow(String name, double temp) {
     this.name = name;
-    this.min = min;
-    this.mean = mean;
-    this.max = max;
+    this.min = temp;
+    this.max = temp;
+    this.sum = temp;
+    this.count = 1;
   }
 
-  public TableRow merge(double temp) {
+  public void merge(double temp) {
     if (temp < min) {
       min = temp;
     }
@@ -26,12 +26,11 @@ public class TableRow {
     }
     sum += temp;
     count++;
-
-    return this;
   }
 
   public String toString() {
-    return STR."\{round(min)}/\{round(sum / count)}/\{round(max)}";
+    double mean = round(sum) / count;
+    return STR."\{round(min)}/\{round(mean)}/\{round(max)}";
   }
 
   public String getName() {

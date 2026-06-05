@@ -28,33 +28,34 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.util.HashMap;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.zip.CRC32;
+import java.util.TreeMap;
+import java.util.zip.CRC32C;
 
 @SuppressWarnings({"Since15", "preview"})
 public class CalculateAverage_no_allocations {
 
   private static final String FILE = "./measurements.txt";
 
-  private static final ConcurrentHashMap<Long, TableRow> table = new ConcurrentHashMap<>();
-  private static final ThreadLocal<CRC32> crcTl = new ThreadLocal<>();
+  private static final int CAP = 32768; // must be bigger than 10k
+  private static final ThreadLocal<long[]> keysTl = new ThreadLocal<>();
+  private static final ThreadLocal<TableRow[]> rowsTl = new ThreadLocal<>();
+  private static final ThreadLocal<CRC32C> crcTl = new ThreadLocal<>();
 
-  static void main(String[] args) throws IOException {
-    initTables();
+  static void main() throws IOException {
     try (var channel = FileChannel.open(Paths.get(FILE), StandardOpenOption.READ);
         var arena = Arena.ofShared()) {
       var memSegment = channel.map(MapMode.READ_ONLY, 0, channel.size(), arena);
-      parseRegion(memSegment, 0, channel.size());
+      var rows = parseRegion(memSegment, 0, channel.size());
 
-      var resultsTable = new HashMap<String, String>();
-      table.forEachValue(100, (row) -> resultsTable.put(row.getName(), row.toString()));
+      var resultsTable = new TreeMap<String, String>();
+      for (TableRow row : rows) {
+        if (row != null) {
+          resultsTable.put(row.getName(), row.toString());
+        }
+      }
 
       System.out.println(resultsTable);
     }
-  }
-
-  static void initTables() {
   }
 
   enum RegionParseState {
@@ -63,8 +64,10 @@ public class CalculateAverage_no_allocations {
   }
 
   @SuppressWarnings("SameParameterValue")
-  static void parseRegion(MemorySegment segment, long startingOffset, long regionSize) {
-    crcTl.set(new CRC32());
+  static TableRow[] parseRegion(MemorySegment segment, long startingOffset, long regionSize) {
+    crcTl.set(new CRC32C());
+    keysTl.set(new long[CAP]);
+    rowsTl.set(new TableRow[CAP]);
 
     var state = RegionParseState.ACCUMULATING_NAME;
     var offset = startingOffset;
@@ -81,13 +84,16 @@ public class CalculateAverage_no_allocations {
 
     while (offset < regionSize) {
       if (offset + 8 <= regionSize) {
-        var w = segment.getAtIndex(ValueLayout.JAVA_LONG, offset);
-        word.putLong(w).clear();
+        var w = segment.get(ValueLayout.JAVA_LONG, offset);
+        word.clear().putLong(w);
         offset += 8;
       } else {
-        readLessThan8Bytes(segment, offset, (int) (regionSize - offset), word);
-        offset += regionSize - offset;
+        var remaining = (int) (regionSize - offset);
+        readLessThan8Bytes(segment, offset, remaining, word);
+        offset += remaining;
+        word.limit(remaining);
       }
+      word.rewind();
       switch (state) {
         case ACCUMULATING_NAME: {
           state = accumulateName(word, name, temp);
@@ -102,6 +108,8 @@ public class CalculateAverage_no_allocations {
       // accumulations must empty the word buffer
       assert !word.hasRemaining();
     }
+
+    return rowsTl.get();
   }
 
   static RegionParseState accumulateName(
@@ -144,6 +152,7 @@ public class CalculateAverage_no_allocations {
 
     var newlineIndex = searchForFirstNewline(word);
     if (newlineIndex == -1) {
+      temp.put(word);
       return RegionParseState.ACCUMULATING_TEMPERATURE;
     } else {
       // found newline, saving chunk bytes to temp (without newline)
@@ -151,6 +160,9 @@ public class CalculateAverage_no_allocations {
       //newlineIndex is relative to the word.position()
       temp.put(word.limit(word.position() + (int) newlineIndex));
       word.limit(limit);
+
+      //skipping newline itself
+      word.get();
 
       //name and temp are found, now we can consume the record in full
       consumeRecord(name, temp);
@@ -164,29 +176,35 @@ public class CalculateAverage_no_allocations {
   }
 
   static void consumeRecord(ByteBuffer name, ByteBuffer temp) {
-    name.mark();
+    name.flip();
+    temp.flip();
 
+    name.mark();
     var crc = crcTl.get();
     crc.reset();
     crc.update(name);
     var hash = crc.getValue();
+
     name.reset();
 
-    table.compute(
-        hash, (_, existing) -> {
-          var tempDouble = parseTemp(temp);
-          if (existing == null) {
-            return new TableRow(
-                UTF_8.decode(name).toString(),
-                tempDouble,
-                tempDouble,
-                tempDouble
-            );
-          } else {
-            return existing.merge(tempDouble);
-          }
-        }
-    );
+    var tempDouble = parseTemp(temp);
+    insertOrMergeRow(hash, name, tempDouble);
+  }
+
+  static void insertOrMergeRow(long hash, ByteBuffer name, double temp) {
+    int idx = (int) (hash & (CAP - 1));
+    var keys = keysTl.get();
+    var rows = rowsTl.get();
+    while (rows[idx] != null) {
+      if (keys[idx] == hash) {
+        var existing = rows[idx];
+        existing.merge(temp);
+        return;
+      }
+      idx = (idx + 1) & (CAP - 1);
+    }
+    keys[idx] = hash;
+    rows[idx] = new TableRow(UTF_8.decode(name).toString(), temp);
   }
 
   static double parseTemp(ByteBuffer buffer) {

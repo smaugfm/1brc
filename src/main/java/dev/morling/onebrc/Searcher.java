@@ -17,7 +17,7 @@ public class Searcher {
     var limit = b.limit();
     var remaining = b.remaining();
     var word = b.clear().getLong();
-    word = word << position;
+    word = word >>> position * 8;
 
     b.position(position).limit(limit);
 
