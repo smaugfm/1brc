@@ -41,21 +41,67 @@ public class CalculateAverage_no_allocations {
   private static final ThreadLocal<TableRow[]> rowsTl = new ThreadLocal<>();
   private static final ThreadLocal<CRC32C> crcTl = new ThreadLocal<>();
 
-  static void main() throws IOException {
+  static void main() throws IOException, InterruptedException {
     try (var channel = FileChannel.open(Paths.get(FILE), StandardOpenOption.READ);
         var arena = Arena.ofShared()) {
       var memSegment = channel.map(MapMode.READ_ONLY, 0, channel.size(), arena);
-      var rows = parseRegion(memSegment, 0, channel.size());
 
-      var resultsTable = new TreeMap<String, String>();
-      for (TableRow row : rows) {
-        if (row != null) {
-          resultsTable.put(row.getName(), row.toString());
+      // Small files don't divide cleanly across many cores (a region can end up smaller than a
+      // single record), so fall back to a single thread below a threshold.
+      Thread[] threads = new Thread[(int) Math.clamp(
+          channel.size() / 107,
+          1, Runtime.getRuntime().availableProcessors()
+      )];
+      TableRow[][] results = new TableRow[threads.length][];
+
+      var boundary = 0L;
+      for (int i = 0; i < threads.length; i++) {
+        long nextBoundary = snapToBoundary(memSegment, channel.size() * (i + 1) / threads.length);
+        final int idx = i;
+        final long start = boundary;
+        threads[i] = new Thread(() -> results[idx] = parseRegion(
+            memSegment.asSlice(start, (nextBoundary - start))
+        ));
+        threads[i].start();
+        boundary = nextBoundary;
+      }
+      for (Thread t : threads) {
+        t.join();
+      }
+
+      TreeMap<String, TableRow> merged = new TreeMap<>();
+      for (TableRow[] table : results) {
+        for (TableRow row : table) {
+          if (row == null) {
+            continue;
+          }
+          merged.merge(
+              row.getName(), row, (a, b) -> {
+                a.mergeRow(b);
+                return a;
+              }
+          );
         }
       }
 
-      System.out.println(resultsTable);
+      System.out.println(merged);
     }
+  }
+
+  static long snapToBoundary(MemorySegment segment, long candidateBoundary) {
+    if (candidateBoundary == segment.byteSize()) {
+      return candidateBoundary;
+    }
+
+    // max record size: {100_symbols};-99.9\n
+    //100+1+5+1 = 107
+    var size = segment.byteSize();
+    long p = candidateBoundary;
+    while (p < size && segment.get(ValueLayout.JAVA_BYTE, p) != '\n') {
+      p++;
+    }
+
+    return Math.min(p + 1, size);
   }
 
   enum RegionParseState {
@@ -64,13 +110,13 @@ public class CalculateAverage_no_allocations {
   }
 
   @SuppressWarnings("SameParameterValue")
-  static TableRow[] parseRegion(MemorySegment segment, long startingOffset, long regionSize) {
+  static TableRow[] parseRegion(MemorySegment segment) {
     crcTl.set(new CRC32C());
     keysTl.set(new long[CAP]);
     rowsTl.set(new TableRow[CAP]);
 
     var state = RegionParseState.ACCUMULATING_NAME;
-    var offset = startingOffset;
+    var offset = 0L;
 
     // Max record size is 107 bytes: 100 for name, ';', 5 for temp, '\n'
 
@@ -82,13 +128,13 @@ public class CalculateAverage_no_allocations {
     //will be reading in longs
     var word = allocate(8);
 
-    while (offset < regionSize) {
-      if (offset + 8 <= regionSize) {
-        var w = segment.get(ValueLayout.JAVA_LONG, offset);
+    while (offset < segment.byteSize()) {
+      if (offset + 8 <= segment.byteSize()) {
+        var w = segment.get(ValueLayout.JAVA_LONG_UNALIGNED, offset);
         word.clear().putLong(w);
         offset += 8;
       } else {
-        var remaining = (int) (regionSize - offset);
+        var remaining = (int) (segment.byteSize() - offset);
         word.clear();
         readLessThan8Bytes(segment, offset, remaining, word);
         offset += remaining;
@@ -199,7 +245,7 @@ public class CalculateAverage_no_allocations {
     while (rows[idx] != null) {
       if (keys[idx] == hash && rows[idx].nameEquals(name)) {
         var existing = rows[idx];
-        existing.merge(temp);
+        existing.mergeTemp(temp);
         return;
       }
       idx = (idx + 1) & (CAP - 1);

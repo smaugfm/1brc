@@ -21,7 +21,7 @@ public class TableRow {
     this.count = 1;
   }
 
-  public void merge(double temp) {
+  public void mergeTemp(double temp) {
     if (temp < min) {
       min = temp;
     }
@@ -30,6 +30,17 @@ public class TableRow {
     }
     sum += temp;
     count++;
+  }
+
+  public void mergeRow(TableRow other) {
+    if (other.min < min) {
+      min = other.min;
+    }
+    if (other.max > max) {
+      max = other.max;
+    }
+    sum += other.sum;
+    count += other.count;
   }
 
   /**
