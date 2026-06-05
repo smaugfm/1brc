@@ -23,6 +23,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Paths;
@@ -74,12 +75,12 @@ public class CalculateAverage_no_allocations {
     // Max record size is 107 bytes: 100 for name, ';', 5 for temp, '\n'
 
     // ceil(100/8=12.5) = 13
-    var name = ByteBuffer.allocateDirect(13 * 8);
+    var name = allocate(13 * 8);
     // ceil(6/8 = 0.75) = 1
-    var temp = ByteBuffer.allocateDirect(8);
+    var temp = allocate(8);
 
     //will be reading in longs
-    var word = ByteBuffer.allocateDirect(8);
+    var word = allocate(8);
 
     while (offset < regionSize) {
       if (offset + 8 <= regionSize) {
@@ -88,6 +89,7 @@ public class CalculateAverage_no_allocations {
         offset += 8;
       } else {
         var remaining = (int) (regionSize - offset);
+        word.clear();
         readLessThan8Bytes(segment, offset, remaining, word);
         offset += remaining;
         word.limit(remaining);
@@ -251,6 +253,10 @@ public class CalculateAverage_no_allocations {
     if ((len & 1) != 0) {
       dst.put(seg.get(ValueLayout.JAVA_BYTE, offset));
     }
+  }
+
+  static ByteBuffer allocate(int size) {
+    return ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder());
   }
 }
 
