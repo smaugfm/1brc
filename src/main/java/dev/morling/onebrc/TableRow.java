@@ -43,18 +43,15 @@ public class TableRow {
     count += other.count;
   }
 
-  /**
-   * True if `buf` [position, limit) holds exactly this row's name bytes. No allocation, no position change.
-   */
   public boolean nameEquals(ByteBuffer buf) {
     int len = buf.remaining();
     if (len != name.length) {
-      return false;        // fast reject — most collisions differ in length
+      return false;
     }
     int base = buf.position();
     for (int i = 0; i < len; i++) {
       if (buf.get(base + i) != name[i]) {
-        return false;   // absolute get → doesn't move position
+        return false;
       }
     }
     return true;

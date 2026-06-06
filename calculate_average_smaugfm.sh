@@ -16,5 +16,5 @@
 #
 
 # --enable-preview: string templates, unnamed variables, instance main, FFM (all preview in JDK 21)
-JAVA_OPTS="--enable-preview --enable-native-access=ALL-UNNAMED"
-java $JAVA_OPTS --class-path target/average-1.0.0-SNAPSHOT.jar dev.morling.onebrc.CalculateAverage_no_allocations
+JAVA_OPTS="--enable-preview --enable-native-access=ALL-UNNAMED -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:-AlwaysPreTouch"
+java $JAVA_OPTS --class-path target/average-1.0.0-SNAPSHOT.jar dev.morling.onebrc.CalculateAverage_smaugfm

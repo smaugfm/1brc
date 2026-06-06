@@ -32,7 +32,7 @@ import java.util.TreeMap;
 import java.util.zip.CRC32C;
 
 @SuppressWarnings({"Since15", "preview"})
-public class CalculateAverage_no_allocations {
+public class CalculateAverage_smaugfm {
 
   private static final String FILE = "./measurements.txt";
 
@@ -252,15 +252,12 @@ public class CalculateAverage_no_allocations {
     rows[idx] = new TableRow(toBytes(name), temp);
   }
 
-  /**
-   * Copy a buffer's [position, limit) into a fresh byte[]. Only called ≤10k times (on insert).
-   */
   static byte[] toBytes(ByteBuffer buf) {
     int len = buf.remaining();
     byte[] b = new byte[len];
     int base = buf.position();
     for (int i = 0; i < len; i++) {
-      b[i] = buf.get(base + i);    // absolute → leaves position intact
+      b[i] = buf.get(base + i);
     }
     return b;
   }
