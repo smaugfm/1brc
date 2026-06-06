@@ -8,12 +8,12 @@ import java.nio.ByteBuffer;
 public class TableRow {
 
   private final byte[] name;
-  private double min;
-  private double max;
-  private double sum;
+  private long min;
+  private long max;
+  private long sum;
   private long count;
 
-  public TableRow(byte[] name, double temp) {
+  public TableRow(byte[] name, long temp) {
     this.name = name;
     this.min = temp;
     this.max = temp;
@@ -21,7 +21,7 @@ public class TableRow {
     this.count = 1;
   }
 
-  public void mergeTemp(double temp) {
+  public void mergeTemp(long temp) {
     if (temp < min) {
       min = temp;
     }
@@ -61,8 +61,8 @@ public class TableRow {
   }
 
   public String toString() {
-    double mean = round(sum) / count;
-    return STR."\{round(min)}/\{round(mean)}/\{round(max)}";
+    double mean = (double) sum / count / 10;
+    return STR."\{round((double) min / 10)}/\{round(mean)}/\{round((double) max / 10)}";
   }
 
   public String getName() {return new String(name, UTF_8);}

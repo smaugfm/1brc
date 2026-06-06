@@ -46,8 +46,6 @@ public class CalculateAverage_no_allocations {
         var arena = Arena.ofShared()) {
       var memSegment = channel.map(MapMode.READ_ONLY, 0, channel.size(), arena);
 
-      // Small files don't divide cleanly across many cores (a region can end up smaller than a
-      // single record), so fall back to a single thread below a threshold.
       Thread[] threads = new Thread[(int) Math.clamp(
           channel.size() / 107,
           1, Runtime.getRuntime().availableProcessors()
@@ -238,7 +236,7 @@ public class CalculateAverage_no_allocations {
     insertOrMergeRow(hash, name, tempDouble);
   }
 
-  static void insertOrMergeRow(long hash, ByteBuffer name, double temp) {
+  static void insertOrMergeRow(long hash, ByteBuffer name, long temp) {
     int idx = (int) (hash & (CAP - 1));
     var keys = keysTl.get();
     var rows = rowsTl.get();
@@ -267,7 +265,7 @@ public class CalculateAverage_no_allocations {
     return b;
   }
 
-  static double parseTemp(ByteBuffer buffer) {
+  static long parseTemp(ByteBuffer buffer) {
     int sign = 1;
     byte b = buffer.get();
     if (b == '-') {
@@ -284,7 +282,7 @@ public class CalculateAverage_no_allocations {
     }
     value = value * 10 + (buffer.get() - '0');
 
-    return sign * value / 10.0;
+    return sign * value;
   }
 
   static void readLessThan8Bytes(MemorySegment seg, long offset, int len, ByteBuffer dst) {
